@@ -560,7 +560,7 @@ st.markdown("""
   <p>학생 1인당 사교육비와 합계출산율은 전체 패널 기준 <strong>r = −0.714</strong>의 유의미한 음의 상관을 보인다 (p &lt; .001).
   <br>연도 평균으로 분석하면 r = −0.915에 달하며, 고정효과 패널 모형에서도 사교육비
   <strong>1만원 증가 시 출산율 0.027 하락</strong>이 확인된다.
-  '한 아이에게 집중 투자'하는 교육 문화가 추가 출산을 억제하는 구조적 요인으로 작용한다.</p>
+  <br>'한 아이에게 집중 투자'하는 교육 문화가 추가 출산을 억제하는 구조적 요인으로 작용한다.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -848,7 +848,15 @@ fig5.update_traces(
     selector=dict(mode="markers+text"),
 )
 
-fig5.update_layout(**PLOTLY_LAYOUT)
+fig5.update_layout(
+    **PLOTLY_LAYOUT,
+    legend=dict(
+        font=dict(color="#2b2b2b"),
+        bgcolor="#ffffff",
+        bordercolor="#e8e3dc",
+        borderwidth=1,
+    ),
+)
 fig5.update_xaxes(**AXIS_STYLE, title_font=dict(color="#888078"), range=[x_min, x_max])
 fig5.update_yaxes(**AXIS_STYLE, title_font=dict(color="#888078"), range=[y_min, y_max])
 
