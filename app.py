@@ -3,6 +3,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import sqlite3
+import json
+import urllib.request
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -357,6 +359,31 @@ def load_commute():
     return df
 
 @st.cache_data
+def load_bubble():
+    conn = get_conn()
+    return pd.read_sql("""
+        SELECT c.sido, c.move_2024_week,
+               e.edu_cost_per_student,
+               h.house_price_index,
+               t.tfr
+        FROM tb_commute c
+        JOIN tb_tfr t ON c.sido = t.sido AND t.year = 2024
+        JOIN (SELECT sido, edu_cost_per_student FROM tb_edu
+              WHERE year = (SELECT MAX(year) FROM tb_edu)) e ON c.sido = e.sido
+        JOIN (SELECT sido, house_price_index FROM tb_house
+              WHERE year = (SELECT MAX(year) FROM tb_house)) h ON c.sido = h.sido
+    """, conn)
+
+@st.cache_data
+def load_korea_geojson():
+    url = "https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2018/json/skorea-provinces-2018-geo.json"
+    try:
+        with urllib.request.urlopen(url, timeout=8) as r:
+            return json.loads(r.read())
+    except Exception:
+        return None
+
+@st.cache_data
 def load_intl():
     conn = get_conn()
     return pd.read_sql("SELECT * FROM tb_intl", conn)
@@ -478,6 +505,12 @@ with tab_edu1:
     )
     df_edu_f = df_edu[(df_edu["year"] >= year_range[0]) & (df_edu["year"] <= year_range[1])]
 
+    st.markdown(
+        "<div style='text-align:left;color:#888078;font-size:.85rem;margin-bottom:.5rem'>"
+        "💡 연도 범위를 드래그 해보세요</div>",
+        unsafe_allow_html=True,
+    )
+
     # 상관계수 계산
     r_edu, p_edu = stats.pearsonr(df_edu_f["edu_cost_per_student"], df_edu_f["tfr"])
 
@@ -531,6 +564,11 @@ with tab_edu2:
     default_edu = ["서울특별시", "경기도", "전라남도", "제주특별자치도"]
     sel_edu = st.multiselect(
         "시도 선택", sido_list, default=default_edu, key="edu_sido"
+    )
+    st.markdown(
+        "<div style='text-align:left;color:#888078;font-size:.85rem;margin-bottom:.5rem'>"
+        "💡 시도를 검색해서 선택해보세요</div>",
+        unsafe_allow_html=True,
     )
     if sel_edu:
         df_edu_ts = df_edu[df_edu["sido"].isin(sel_edu)]
@@ -725,74 +763,151 @@ df_commute["region"] = df_commute["sido"].apply(
 df_commute_no_sj = df_commute[~df_commute["sido"].str.contains("세종")]
 r_com, p_com = stats.pearsonr(df_commute_no_sj[col_sel], df_commute_no_sj["tfr"])
 
-col_left, col_right = st.columns([2, 1])
+tab_c1, tab_c2 = st.tabs(["📊 산점도", "🗺️ 지역별 지도"])
 
-with col_left:
-    fig4 = px.scatter(
-        df_commute,
-        x=col_sel, y="tfr",
-        color="region",
-        text="sido",
-        trendline="ols",
-        trendline_scope="overall",
-        trendline_color_override=COLOR_MAIN,
-        color_discrete_map={"수도권": COLOR_MAIN, "기타": COLOR_ACCENT},
-        labels={
-            col_sel: "주평균 이동시간 (2024년, 분)",
-            "tfr": "합계출산율",
-            "region": "지역",
-        },
-        height=460,
-    )
-    fig4.update_traces(
-        marker=dict(size=11, opacity=0.85),
-        textposition="top center",
-        selector=dict(mode="markers+text"),
-    )
-    fig4.update_layout(
-        **PLOTLY_LAYOUT,
-        legend=dict(
-            font=dict(color="#2b2b2b"), bgcolor="#ffffff",
-            bordercolor="#e8e3dc", borderwidth=1,
-            orientation="h", y=1.06, x=0.5, xanchor="center",
-        ),
-    )
-    fig4.update_xaxes(**AXIS_STYLE, title_font=dict(color="#888078"))
-    fig4.update_yaxes(**AXIS_STYLE, title_font=dict(color="#888078"))
-    st.plotly_chart(fig4, use_container_width=True)
+with tab_c1:
+    col_left, col_right = st.columns([2, 1])
 
-with col_right:
-    p_str = "< .01" if p_com < 0.01 else "< .05" if p_com < 0.05 else f"= {p_com:.3f}"
-    st.markdown(f"""
-    <div style='margin-top:1rem'>
-    <div class="stat-card">
-      <div class="val">r = {r_com:.3f}</div>
-      <div class="lbl">이동시간-출산율 상관계수</div>
-    </div>
-    </div>
-    <div style='margin-top:1rem'>
-    <div class="stat-card">
-      <div class="val">p {p_str}</div>
-      <div class="lbl">p-value</div>
-    </div>
-    </div>
-    """, unsafe_allow_html=True)
+    with col_left:
+        fig4 = px.scatter(
+            df_commute,
+            x=col_sel, y="tfr",
+            color="region",
+            text="sido",
+            trendline="ols",
+            trendline_scope="overall",
+            trendline_color_override=COLOR_MAIN,
+            color_discrete_map={"수도권": COLOR_MAIN, "기타": COLOR_ACCENT},
+            labels={
+                col_sel: "주평균 이동시간 (2024년, 분)",
+                "tfr": "합계출산율",
+                "region": "지역",
+            },
+            height=460,
+        )
+        fig4.update_traces(
+            marker=dict(size=11, opacity=0.85),
+            textposition="top center",
+            selector=dict(mode="markers+text"),
+        )
+        fig4.update_layout(
+            **PLOTLY_LAYOUT,
+            legend=dict(
+                font=dict(color="#2b2b2b"), bgcolor="#ffffff",
+                bordercolor="#e8e3dc", borderwidth=1,
+                orientation="h", y=1.06, x=0.5, xanchor="center",
+            ),
+        )
+        fig4.update_xaxes(**AXIS_STYLE, title_font=dict(color="#888078"))
+        fig4.update_yaxes(**AXIS_STYLE, title_font=dict(color="#888078"))
+        st.plotly_chart(fig4, use_container_width=True)
 
-col_top, col_bot = st.columns(2)
+    with col_right:
+        p_str = "< .01" if p_com < 0.01 else "< .05" if p_com < 0.05 else f"= {p_com:.3f}"
+        st.markdown(f"""
+        <div style='margin-top:1rem'>
+        <div class="stat-card">
+          <div class="val">r = {r_com:.3f}</div>
+          <div class="lbl">이동시간-출산율 상관계수</div>
+        </div>
+        </div>
+        <div style='margin-top:1rem'>
+        <div class="stat-card">
+          <div class="val">p {p_str}</div>
+          <div class="lbl">p-value</div>
+        </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-with col_top:
-    st.markdown("<div style='margin-top:.8rem;color:#2b2b2b;font-weight:600'>이동시간 상위 3개 시도</div>", unsafe_allow_html=True)
-    top3 = df_commute.nlargest(3, col_sel)[["sido", col_sel, "tfr"]].rename(
-        columns={"sido": "시도", col_sel: "이동시간(분)", "tfr": "TFR"}
-    )
-    st.markdown(top3.to_html(index=False, classes="styled-table"), unsafe_allow_html=True)
+    col_top, col_bot = st.columns(2)
 
-with col_bot:
-    st.markdown("<div style='margin-top:.8rem;color:#2b2b2b;font-weight:600'>이동시간 하위 3개 시도</div>", unsafe_allow_html=True)
-    bot3 = df_commute.nsmallest(3, col_sel)[["sido", col_sel, "tfr"]].rename(
-        columns={"sido": "시도", col_sel: "이동시간(분)", "tfr": "TFR"}
-    )
-    st.markdown(bot3.to_html(index=False, classes="styled-table"), unsafe_allow_html=True)
+    with col_top:
+        st.markdown("<div style='margin-top:.8rem;color:#2b2b2b;font-weight:600'>이동시간 상위 3개 시도</div>", unsafe_allow_html=True)
+        top3 = df_commute.nlargest(3, col_sel)[["sido", col_sel, "tfr"]].rename(
+            columns={"sido": "시도", col_sel: "이동시간(분)", "tfr": "TFR"}
+        )
+        st.markdown(top3.to_html(index=False, classes="styled-table"), unsafe_allow_html=True)
+
+    with col_bot:
+        st.markdown("<div style='margin-top:.8rem;color:#2b2b2b;font-weight:600'>이동시간 하위 3개 시도</div>", unsafe_allow_html=True)
+        bot3 = df_commute.nsmallest(3, col_sel)[["sido", col_sel, "tfr"]].rename(
+            columns={"sido": "시도", col_sel: "이동시간(분)", "tfr": "TFR"}
+        )
+        st.markdown(bot3.to_html(index=False, classes="styled-table"), unsafe_allow_html=True)
+
+with tab_c2:
+    korea_geo = load_korea_geojson()
+    if korea_geo is None:
+        st.warning("지도 데이터를 불러올 수 없습니다. 인터넷 연결을 확인해주세요.")
+    else:
+        sido_name_map = {
+            "강원특별자치도": "강원도",
+            "전북특별자치도": "전라북도",
+        }
+        df_map = df_commute.copy()
+        df_map["sido_geo"] = df_map["sido"].replace(sido_name_map)
+
+        _map_layout = {**PLOTLY_LAYOUT, "margin": dict(t=40, b=10, l=0, r=0)}
+        _cbar = dict(tickfont=dict(color="#888078"), title_font=dict(color="#888078"), len=0.55, y=0.5)
+
+        col_m1, col_m2 = st.columns(2)
+
+        with col_m1:
+            st.markdown(
+                "<div style='text-align:center;font-weight:600;color:#2b2b2b;margin-bottom:.3rem'>"
+                "🚌 주평균 이동시간 (2024년, 분)</div>",
+                unsafe_allow_html=True,
+            )
+            fig_map1 = px.choropleth(
+                df_map,
+                geojson=korea_geo,
+                locations="sido_geo",
+                featureidkey="properties.name",
+                color=col_sel,
+                color_continuous_scale=[[0, "#f7f5f2"], [0.5, COLOR_ACCENT], [1, COLOR_MAIN]],
+                hover_name="sido",
+                hover_data={col_sel: ":.1f", "sido_geo": False},
+                labels={col_sel: "이동시간(분)"},
+                height=480,
+            )
+            fig_map1.update_geos(fitbounds="locations", visible=False)
+            fig_map1.update_layout(
+                **_map_layout,
+                coloraxis_colorbar=dict(title="이동시간(분)", **_cbar),
+            )
+            st.plotly_chart(fig_map1, use_container_width=True)
+
+        with col_m2:
+            st.markdown(
+                "<div style='text-align:center;font-weight:600;color:#2b2b2b;margin-bottom:.3rem'>"
+                "👶 합계출산율 (TFR, 2024년)</div>",
+                unsafe_allow_html=True,
+            )
+            fig_map2 = px.choropleth(
+                df_map,
+                geojson=korea_geo,
+                locations="sido_geo",
+                featureidkey="properties.name",
+                color="tfr",
+                color_continuous_scale=[[0, COLOR_MAIN], [0.5, COLOR_ACCENT], [1, "#f7f5f2"]],
+                hover_name="sido",
+                hover_data={"tfr": ":.3f", "sido_geo": False},
+                labels={"tfr": "합계출산율"},
+                height=480,
+            )
+            fig_map2.update_geos(fitbounds="locations", visible=False)
+            fig_map2.update_layout(
+                **_map_layout,
+                coloraxis_colorbar=dict(title="합계출산율", **_cbar),
+            )
+            st.plotly_chart(fig_map2, use_container_width=True)
+
+        st.markdown(
+            "<div style='text-align:left;color:#888078;font-size:.85rem;margin-top:-.8rem'>"
+            "💡 두 지도 모두 <strong style='color:#e94560'>빨간색</strong>이 짙을수록 문제 지역 — "
+            "이동시간이 길고(좌) 출산율이 낮은(우) 시도가 일치할수록 통근 부담의 영향이 큽니다</div>",
+            unsafe_allow_html=True,
+        )
 
 st.markdown("""
 <div class="insight-box">
@@ -860,27 +975,92 @@ fig5.update_layout(
 fig5.update_xaxes(**AXIS_STYLE, title_font=dict(color="#888078"), range=[x_min, x_max])
 fig5.update_yaxes(**AXIS_STYLE, title_font=dict(color="#888078"), range=[y_min, y_max])
 
-col5_left, col5_right = st.columns([2, 1])
+p5_str = "< .01" if p_intl < 0.01 else "< .05" if p_intl < 0.05 else f"= {p_intl:.3f}"
 
-with col5_left:
-    st.plotly_chart(fig5, use_container_width=True)
+tab5_1, tab5_2 = st.tabs(["📊 신뢰도 × 출산율 산점도", "🏆 OECD TFR 국가 비교"])
 
-with col5_right:
-    p5_str = "< .01" if p_intl < 0.01 else "< .05" if p_intl < 0.05 else f"= {p_intl:.3f}"
-    st.markdown(f"""
-    <div style='margin-top:1rem'>
-    <div class="stat-card">
-      <div class="val">r = {r_intl:.3f}</div>
-      <div class="lbl">신뢰도-출산율 상관계수</div>
-    </div>
-    </div>
-    <div style='margin-top:1rem'>
-    <div class="stat-card">
-      <div class="val">p {p5_str}</div>
-      <div class="lbl">p-value</div>
-    </div>
-    </div>
-    """, unsafe_allow_html=True)
+with tab5_1:
+    col5_left, col5_right = st.columns([2, 1])
+
+    with col5_left:
+        st.plotly_chart(fig5, use_container_width=True)
+
+    with col5_right:
+        st.markdown(f"""
+        <div style='margin-top:1rem'>
+        <div class="stat-card">
+          <div class="val">r = {r_intl:.3f}</div>
+          <div class="lbl">신뢰도-출산율 상관계수</div>
+        </div>
+        </div>
+        <div style='margin-top:1rem'>
+        <div class="stat-card">
+          <div class="val">p {p5_str}</div>
+          <div class="lbl">p-value</div>
+        </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+with tab5_2:
+    _CONTINENT_MAP = {
+        "Austria": "유럽", "Belgium": "유럽", "Czech Republic": "유럽",
+        "Denmark": "유럽", "Estonia": "유럽", "Finland": "유럽",
+        "France": "유럽", "Germany": "유럽", "Greece": "유럽",
+        "Hungary": "유럽", "Iceland": "유럽", "Ireland": "유럽",
+        "Italy": "유럽", "Latvia": "유럽", "Lithuania": "유럽",
+        "Luxembourg": "유럽", "Netherlands": "유럽", "Norway": "유럽",
+        "Poland": "유럽", "Portugal": "유럽", "Slovakia": "유럽",
+        "Slovenia": "유럽", "Spain": "유럽", "Sweden": "유럽",
+        "Switzerland": "유럽", "Turkey": "유럽", "United Kingdom": "유럽",
+        "Canada": "북미", "Mexico": "북미", "United States": "북미",
+        "Chile": "중남미", "Colombia": "중남미", "Costa Rica": "중남미",
+        "Australia": "아시아·태평양", "Japan": "아시아·태평양",
+        "New Zealand": "아시아·태평양", "Israel": "아시아·태평양",
+    }
+    df_intl2 = df_intl.copy()
+    df_intl2["continent"] = df_intl2["country"].apply(
+        lambda c: "🇰🇷 한국" if "Korea" in c else _CONTINENT_MAP.get(c, "기타")
+    )
+
+    # 대륙별 평균 (한국 제외)
+    df_cont = (
+        df_intl2[df_intl2["continent"] != "🇰🇷 한국"]
+        .groupby("continent")["tfr"].mean()
+        .reset_index()
+        .rename(columns={"continent": "label"})
+    )
+    # 한국 단독 행 추가
+    korea_tfr = df_intl2[df_intl2["continent"] == "🇰🇷 한국"]["tfr"].values[0]
+    df_bar5 = pd.concat(
+        [df_cont, pd.DataFrame([{"label": "🇰🇷 한국", "tfr": korea_tfr}])],
+        ignore_index=True,
+    ).sort_values("tfr", ascending=True).reset_index(drop=True)
+
+    bar_colors = [COLOR_MAIN if "한국" in lb else COLOR_SECOND for lb in df_bar5["label"]]
+
+    fig5b = go.Figure(go.Bar(
+        x=df_bar5["tfr"],
+        y=df_bar5["label"],
+        orientation="h",
+        marker_color=bar_colors,
+        text=df_bar5["tfr"].round(2),
+        textposition="outside",
+        textfont=dict(color="#2b2b2b"),
+        hovertemplate="%{y}: %{x:.2f}<extra></extra>",
+    ))
+    fig5b.update_layout(
+        **PLOTLY_LAYOUT,
+        height=360,
+        xaxis=dict(**AXIS_STYLE, title="합계출산율 (TFR)", title_font=dict(color="#888078"),
+                   range=[0, df_bar5["tfr"].max() + 0.3]),
+        yaxis={**AXIS_STYLE, "title": "", "tickfont": dict(color="#2b2b2b")},
+    )
+    st.plotly_chart(fig5b, use_container_width=True)
+    st.markdown(
+        "<div style='text-align:left;color:#888078;font-size:.85rem;margin-top:-.4rem'>"
+        "💡 한국은 모든 대륙 평균보다 낮은 최하위 — 대륙별 OECD 국가 TFR 평균과 비교한 값입니다</div>",
+        unsafe_allow_html=True,
+    )
 
 st.markdown(f"""
 <div class="insight-box">
@@ -994,6 +1174,81 @@ with col_ins:
       </p>
     </div>
     """, unsafe_allow_html=True)
+
+# ── 복합 요인 버블 차트 ──────────────────────────
+st.markdown("<div style='margin-top:2rem'></div>", unsafe_allow_html=True)
+st.markdown("""
+<div style='font-size:1.05rem;font-weight:600;color:#2b2b2b;margin-bottom:.5rem'>
+  🔵 복합 요인 버블 차트 — 세 가지 구조적 부담이 겹치는 시도
+</div>
+<div style='font-size:.85rem;color:#888078;margin-bottom:.8rem'>
+  X: 사교육비 &nbsp;|&nbsp; Y: 주택가격지수 &nbsp;|&nbsp; 버블 크기·색상: 합계출산율 (낮을수록 크고 빨강)
+</div>
+""", unsafe_allow_html=True)
+
+df_bubble = load_bubble()
+# 출산율 낮을수록(문제 심각) 버블이 커지도록 역산
+df_bubble["tfr_inv"] = df_bubble["tfr"].max() - df_bubble["tfr"] + 0.05
+
+fig_bubble = px.scatter(
+    df_bubble,
+    x="edu_cost_per_student",
+    y="house_price_index",
+    size="tfr_inv",
+    color="tfr",
+    text="sido",
+    color_continuous_scale=[[0, COLOR_MAIN], [0.5, COLOR_ACCENT], [1, "#c7e5f7"]],
+    size_max=60,
+    labels={
+        "edu_cost_per_student": "학생 1인당 사교육비 (만원)",
+        "house_price_index": "주택매매가격지수",
+        "move_2024_week": "이동시간(분)",
+        "tfr": "합계출산율",
+    },
+    hover_name="sido",
+    hover_data={
+        "edu_cost_per_student": ":.1f",
+        "house_price_index": ":.1f",
+        "move_2024_week": ":.1f",
+        "tfr": ":.3f",
+        "tfr_inv": False,
+        "sido": False,
+    },
+    height=500,
+)
+fig_bubble.update_traces(
+    textposition="top center",
+    textfont=dict(color="#2b2b2b", size=11),
+    selector=dict(mode="markers+text"),
+)
+fig_bubble.update_layout(
+    **PLOTLY_LAYOUT,
+    coloraxis_colorbar=dict(
+        title="합계출산율",
+        tickfont=dict(color="#888078"),
+        title_font=dict(color="#888078"),
+        len=0.6,
+    ),
+)
+fig_bubble.update_xaxes(**AXIS_STYLE, title_font=dict(color="#888078"))
+fig_bubble.update_yaxes(**AXIS_STYLE, title_font=dict(color="#888078"))
+st.plotly_chart(fig_bubble, use_container_width=True)
+st.markdown(
+    "<div style='text-align:left;color:#888078;font-size:.85rem;margin-top:-.4rem'>"
+    "💡 버블이 크고 빨갈수록 출산율이 낮은 심각 지역 — "
+    "오른쪽 위에 위치할수록 사교육비·주거 부담도 동시에 높습니다</div>",
+    unsafe_allow_html=True,
+)
+st.markdown("""
+<div class="insight-box">
+  <p>- <strong>사교육비·주택비용과 출산율의 반비례 관계:</strong>
+  학생 1인당 사교육비와 주택매매가격지수가 높을수록 합계출산율이 낮아지는 경향이 시각적으로 확인된다.
+  <br>
+  - <strong>대도시권의 복합적 양육 부담:</strong>
+  서울 및 주요 광역시 등 교육·주거비 부담이 동시에 집중되는 지역일수록
+  출산율 감소(버블 크기 및 붉은 색상)가 더욱 뚜렷하게 나타난다.</p>
+</div>
+""", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════
 # SQL 쿼리 뷰어
